@@ -10,6 +10,7 @@ class SilktideCookieBanner {
     this.cookieIcon = null;
     this.cookieTriggerIsCustomLink = false;
     this.cookieIconDefaultDisplay = '';
+    this.customTriggerObserver = null;
     this.backdrop = null;
 
     this.createWrapper();
@@ -50,6 +51,10 @@ class SilktideCookieBanner {
     this.banner = null;
     this.modal = null;
     this.cookieIcon = null;
+    if (this.customTriggerObserver) {
+      this.customTriggerObserver.disconnect();
+      this.customTriggerObserver = null;
+    }
     this.backdrop = null;
   }
 
@@ -504,12 +509,84 @@ class SilktideCookieBanner {
     }
   }
 
+  findCookieTriggerElement(triggerIdOrSelector) {
+    if (!triggerIdOrSelector) {
+      return null;
+    }
+
+    const normalized = String(triggerIdOrSelector).trim();
+    if (!normalized) {
+      return null;
+    }
+
+    // Supports both "my-id" and "#my-id".
+    const asId = normalized.startsWith('#') ? normalized.slice(1) : normalized;
+    return document.getElementById(asId) || document.querySelector(normalized);
+  }
+
+  watchForCustomTrigger(triggerIdOrSelector) {
+    if (!triggerIdOrSelector || this.customTriggerObserver || !document.body) {
+      return;
+    }
+
+    this.customTriggerObserver = new MutationObserver(() => {
+      const triggerEl = this.findCookieTriggerElement(triggerIdOrSelector);
+      if (!triggerEl) {
+        return;
+      }
+
+      this.cookieIcon = triggerEl;
+      this.cookieTriggerIsCustomLink = true;
+      this.cookieIconDefaultDisplay = this.cookieIcon.style.display || '';
+
+      if (this.config.text?.banner?.preferencesButtonAccessibleLabel) {
+        this.cookieIcon.ariaLabel = this.config.text.banner.preferencesButtonAccessibleLabel;
+      }
+
+      this.attachCookieTriggerClickListener();
+      this.customTriggerObserver.disconnect();
+      this.customTriggerObserver = null;
+    });
+
+    this.customTriggerObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  attachCookieTriggerClickListener() {
+    if (!this.cookieIcon || this.cookieIcon.dataset.silktideTriggerBound === 'true') {
+      return;
+    }
+
+    this.cookieIcon.addEventListener('click', (event) => {
+      if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+
+      // If modal is not found, create it
+      if (!this.modal) {
+        this.createModal();
+        this.toggleModal(true);
+        this.hideCookieIcon();
+      }
+      // If modal is hidden, show it
+      else if (this.modal.style.display === 'none' || this.modal.style.display === '') {
+        this.toggleModal(true);
+        this.hideCookieIcon();
+      }
+      // If modal is visible, hide it
+      else {
+        this.toggleModal(false);
+      }
+    });
+
+    this.cookieIcon.dataset.silktideTriggerBound = 'true';
+  }
+
   createCookieIcon() {
     const customTriggerId = this.config.customPageIdLink || this.config.cookieTriggerId;
     const fallbackTriggerId = 'silktide-cookie-link';
 
     this.cookieIcon = customTriggerId
-      ? document.getElementById(customTriggerId)
+      ? this.findCookieTriggerElement(customTriggerId)
       : document.getElementById(fallbackTriggerId);
 
     // Backward-compatibility fallback for older markup that used this id directly.
@@ -518,6 +595,9 @@ class SilktideCookieBanner {
     }
 
     if (!this.cookieIcon) {
+      if (customTriggerId) {
+        this.watchForCustomTrigger(customTriggerId);
+      }
       return;
     }
 
@@ -741,29 +821,7 @@ class SilktideCookieBanner {
     }
 
     // Check Cookie Icon exists before trying to add event listeners
-    if (this.cookieIcon) {
-      this.cookieIcon.onclick = (event) => {
-        if (event && typeof event.preventDefault === 'function') {
-          event.preventDefault();
-        }
-
-        // If modal is not found, create it
-        if (!this.modal) {
-          this.createModal();
-          this.toggleModal(true);
-          this.hideCookieIcon();
-        }
-        // If modal is hidden, show it
-        else if (this.modal.style.display === 'none' || this.modal.style.display === '') {
-          this.toggleModal(true);
-          this.hideCookieIcon();
-        }
-        // If modal is visible, hide it
-        else {
-          this.toggleModal(false);
-        }
-      };
-    }
+    this.attachCookieTriggerClickListener();
   }
 
   getBannerSuffix() {
