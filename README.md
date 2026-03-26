@@ -1,1 +1,1 @@
-# Silktide cookie solution - Webflow compatible
+# Cookie solution
