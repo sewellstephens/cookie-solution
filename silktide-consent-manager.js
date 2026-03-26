@@ -485,6 +485,26 @@ class SilktideCookieBanner {
     this.modal = this.createWrapperChild(this.getModalContent(), 'silktide-modal');
   }
 
+  ensureUiElementsExist() {
+    if (!this.wrapper || !document.body.contains(this.wrapper)) {
+      this.createWrapper();
+    }
+
+    if (this.shouldShowBackdrop() && (!this.backdrop || !document.body.contains(this.backdrop))) {
+      this.createBackdrop();
+    }
+
+    if (!this.modal || !document.body.contains(this.modal)) {
+      this.createModal();
+      this.setupModalEventListeners();
+    }
+  }
+
+  openPreferencesModal() {
+    this.ensureUiElementsExist();
+    this.toggleModal(true);
+  }
+
   toggleModal(show) {
     if (!this.modal) return;
 
@@ -617,18 +637,11 @@ class SilktideCookieBanner {
   }
 
   openPreferencesModalFromTrigger() {
-    // If modal is not found, create it
-    if (!this.modal) {
-      this.createModal();
-      this.toggleModal(true);
-      this.hideCookieIcon();
-      return;
-    }
+    this.openPreferencesModal();
+    this.hideCookieIcon();
 
     // If modal is hidden, show it
-    if (this.modal.style.display === 'none' || this.modal.style.display === '') {
-      this.toggleModal(true);
-      this.hideCookieIcon();
+    if (this.modal.style.display === 'flex') {
       return;
     }
 
@@ -784,6 +797,85 @@ class SilktideCookieBanner {
   // ----------------------------------------------------------------
   // Event Listeners
   // ----------------------------------------------------------------
+  setupModalEventListeners() {
+    if (!this.modal) {
+      return;
+    }
+
+    const closeButton = this.modal.querySelector('.modal-close');
+    const acceptAllButton = this.modal.querySelector('.preferences-accept-all');
+    const rejectAllButton = this.modal.querySelector('.preferences-reject-all');
+
+    closeButton?.addEventListener('click', () => {
+      this.toggleModal(false);
+
+      const hasMadeFirstChoice = this.hasSetInitialCookieChoices();
+
+      if (hasMadeFirstChoice) {
+        this.runStoredCookiePreferenceCallbacks();
+      } else {
+        this.handleClosedWithNoChoice();
+      }
+    });
+    acceptAllButton?.addEventListener('click', () => this.handleCookieChoice(true));
+    rejectAllButton?.addEventListener('click', () => this.handleCookieChoice(false));
+
+    const focusableElements = this.getFocusableElements(this.modal);
+    const firstFocusableEl = focusableElements[0];
+    const lastFocusableEl = focusableElements[focusableElements.length - 1];
+
+    this.modal.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        if (e.shiftKey) {
+          if (document.activeElement === firstFocusableEl) {
+            lastFocusableEl.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === lastFocusableEl) {
+            firstFocusableEl.focus();
+            e.preventDefault();
+          }
+        }
+      }
+      if (e.key === 'Escape') {
+        this.toggleModal(false);
+      }
+    });
+
+    closeButton?.focus();
+
+    const preferencesSection = this.modal.querySelector('#cookie-preferences');
+    const checkboxes = preferencesSection.querySelectorAll('input[type="checkbox"]');
+
+    checkboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', (event) => {
+        const [, cookieId] = event.target.id.split('cookies-');
+        const isAccepted = event.target.checked;
+        const previousValue = localStorage.getItem(
+          `silktideCookieChoice_${cookieId}${this.getBannerSuffix()}`
+        ) === 'true';
+
+        if (isAccepted !== previousValue) {
+          const cookieType = this.config.cookieTypes.find(type => type.id === cookieId);
+
+          if (cookieType) {
+            localStorage.setItem(
+              `silktideCookieChoice_${cookieId}${this.getBannerSuffix()}`,
+              isAccepted.toString()
+            );
+
+            if (isAccepted && typeof cookieType.onAccept === 'function') {
+              cookieType.onAccept();
+            } else if (!isAccepted && typeof cookieType.onReject === 'function') {
+              cookieType.onReject();
+            }
+          }
+        }
+      });
+    });
+  }
+
   setupEventListeners() {
     // Check Banner exists before trying to add event listeners
     if (this.banner) {
@@ -829,88 +921,7 @@ class SilktideCookieBanner {
     }
 
     // Check Modal exists before trying to add event listeners
-    if (this.modal) {
-      const closeButton = this.modal.querySelector('.modal-close');
-      const acceptAllButton = this.modal.querySelector('.preferences-accept-all');
-      const rejectAllButton = this.modal.querySelector('.preferences-reject-all');
-
-      closeButton?.addEventListener('click', () => {
-        this.toggleModal(false);
-
-        const hasMadeFirstChoice = this.hasSetInitialCookieChoices();
-
-        if (hasMadeFirstChoice) {
-          // run through the callbacks based on the current localStorage state
-          this.runStoredCookiePreferenceCallbacks();
-        } else {
-          // handle the case where the user closes without making a choice for the first time
-          this.handleClosedWithNoChoice();
-        }
-      });
-      acceptAllButton?.addEventListener('click', () => this.handleCookieChoice(true));
-      rejectAllButton?.addEventListener('click', () => this.handleCookieChoice(false));
-
-      // Banner Focus Trap
-      const focusableElements = this.getFocusableElements(this.modal);
-      const firstFocusableEl = focusableElements[0];
-      const lastFocusableEl = focusableElements[focusableElements.length - 1];
-
-      this.modal.addEventListener('keydown', (e) => {
-        if (e.key === 'Tab') {
-          if (e.shiftKey) {
-            if (document.activeElement === firstFocusableEl) {
-              lastFocusableEl.focus();
-              e.preventDefault();
-            }
-          } else {
-            if (document.activeElement === lastFocusableEl) {
-              firstFocusableEl.focus();
-              e.preventDefault();
-            }
-          }
-        }
-        if (e.key === 'Escape') {
-          this.toggleModal(false);
-        }
-      });
-
-      closeButton?.focus();
-
-      // Update the checkbox event listeners
-      const preferencesSection = this.modal.querySelector('#cookie-preferences');
-      const checkboxes = preferencesSection.querySelectorAll('input[type="checkbox"]');
-      
-      checkboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', (event) => {
-          const [, cookieId] = event.target.id.split('cookies-');
-          const isAccepted = event.target.checked;
-          const previousValue = localStorage.getItem(
-            `silktideCookieChoice_${cookieId}${this.getBannerSuffix()}`
-          ) === 'true';
-          
-          // Only proceed if the value has actually changed
-          if (isAccepted !== previousValue) {
-            // Find the corresponding cookie type
-            const cookieType = this.config.cookieTypes.find(type => type.id === cookieId);
-            
-            if (cookieType) {
-              // Update localStorage
-              localStorage.setItem(
-                `silktideCookieChoice_${cookieId}${this.getBannerSuffix()}`,
-                isAccepted.toString()
-              );
-              
-              // Run the appropriate callback only if the value changed
-              if (isAccepted && typeof cookieType.onAccept === 'function') {
-                cookieType.onAccept();
-              } else if (!isAccepted && typeof cookieType.onReject === 'function') {
-                cookieType.onReject();
-              }
-            }
-          }
-        });
-      });
-    }
+    this.setupModalEventListeners();
 
     // Check Cookie Icon exists before trying to add event listeners
     this.attachCookieTriggerClickListener();
@@ -990,6 +1001,11 @@ class SilktideCookieBanner {
   window.silktideCookieBannerManager.initCookieBanner = initCookieBanner;
   window.silktideCookieBannerManager.updateCookieBannerConfig = updateCookieBannerConfig;
   window.silktideCookieBannerManager.injectScript = injectScript;
+  window.silktideCookieBannerManager.openPreferences = function () {
+    if (cookieBanner) {
+      cookieBanner.openPreferencesModal();
+    }
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initCookieBanner, {once: true});
