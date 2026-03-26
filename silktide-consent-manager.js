@@ -11,6 +11,8 @@ class SilktideCookieBanner {
     this.cookieTriggerIsCustomLink = false;
     this.cookieIconDefaultDisplay = '';
     this.customTriggerObserver = null;
+    this.customTriggerSelector = '';
+    this.boundCustomTriggerHandler = null;
     this.backdrop = null;
 
     this.createWrapper();
@@ -55,6 +57,11 @@ class SilktideCookieBanner {
       this.customTriggerObserver.disconnect();
       this.customTriggerObserver = null;
     }
+    if (this.boundCustomTriggerHandler) {
+      document.removeEventListener('click', this.boundCustomTriggerHandler, true);
+      this.boundCustomTriggerHandler = null;
+    }
+    this.customTriggerSelector = '';
     this.backdrop = null;
   }
 
@@ -551,6 +558,59 @@ class SilktideCookieBanner {
     this.customTriggerObserver.observe(document.body, { childList: true, subtree: true });
   }
 
+  normalizeTriggerSelector(triggerIdOrSelector) {
+    const normalized = String(triggerIdOrSelector || '').trim();
+    if (!normalized) {
+      return '';
+    }
+
+    // If caller passes a plain id like "cookie-link", normalize it to "#cookie-link".
+    if (!normalized.startsWith('#') && !normalized.includes(' ') && !normalized.includes('[') && !normalized.includes('.')) {
+      return `#${normalized}`;
+    }
+
+    return normalized;
+  }
+
+  openPreferencesModalFromTrigger() {
+    // If modal is not found, create it
+    if (!this.modal) {
+      this.createModal();
+      this.toggleModal(true);
+      this.hideCookieIcon();
+      return;
+    }
+
+    // If modal is hidden, show it
+    if (this.modal.style.display === 'none' || this.modal.style.display === '') {
+      this.toggleModal(true);
+      this.hideCookieIcon();
+      return;
+    }
+
+    // If modal is visible, hide it
+    this.toggleModal(false);
+  }
+
+  attachDelegatedCustomTriggerListener() {
+    if (!this.customTriggerSelector || this.boundCustomTriggerHandler) {
+      return;
+    }
+
+    this.boundCustomTriggerHandler = (event) => {
+      const trigger = event.target?.closest?.(this.customTriggerSelector);
+      if (!trigger) {
+        return;
+      }
+
+      event.preventDefault();
+      this.cookieIcon = trigger;
+      this.openPreferencesModalFromTrigger();
+    };
+
+    document.addEventListener('click', this.boundCustomTriggerHandler, true);
+  }
+
   attachCookieTriggerClickListener() {
     if (!this.cookieIcon || this.cookieIcon.dataset.silktideTriggerBound === 'true') {
       return;
@@ -561,21 +621,7 @@ class SilktideCookieBanner {
         event.preventDefault();
       }
 
-      // If modal is not found, create it
-      if (!this.modal) {
-        this.createModal();
-        this.toggleModal(true);
-        this.hideCookieIcon();
-      }
-      // If modal is hidden, show it
-      else if (this.modal.style.display === 'none' || this.modal.style.display === '') {
-        this.toggleModal(true);
-        this.hideCookieIcon();
-      }
-      // If modal is visible, hide it
-      else {
-        this.toggleModal(false);
-      }
+      this.openPreferencesModalFromTrigger();
     });
 
     this.cookieIcon.dataset.silktideTriggerBound = 'true';
@@ -584,6 +630,10 @@ class SilktideCookieBanner {
   createCookieIcon() {
     const customTriggerId = this.config.customPageIdLink || this.config.cookieTriggerId;
     const fallbackTriggerId = 'silktide-cookie-link';
+
+    this.customTriggerSelector = customTriggerId
+      ? this.normalizeTriggerSelector(customTriggerId)
+      : '';
 
     this.cookieIcon = customTriggerId
       ? this.findCookieTriggerElement(customTriggerId)
@@ -596,6 +646,13 @@ class SilktideCookieBanner {
 
     if (!this.cookieIcon) {
       if (customTriggerId) {
+        if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+          console.warn(
+            '[SilktideCookieBanner] Custom trigger not found at init, watching for:',
+            this.customTriggerSelector || customTriggerId,
+          );
+        }
+        this.attachDelegatedCustomTriggerListener();
         this.watchForCustomTrigger(customTriggerId);
       }
       return;
@@ -603,6 +660,10 @@ class SilktideCookieBanner {
 
     this.cookieTriggerIsCustomLink = Boolean(customTriggerId);
     this.cookieIconDefaultDisplay = this.cookieIcon.style.display || '';
+
+    if (this.cookieTriggerIsCustomLink) {
+      this.attachDelegatedCustomTriggerListener();
+    }
 
     if (this.config.text?.banner?.preferencesButtonAccessibleLabel) {
       this.cookieIcon.ariaLabel = this.config.text?.banner?.preferencesButtonAccessibleLabel;
