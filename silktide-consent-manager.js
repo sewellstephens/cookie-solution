@@ -13,6 +13,9 @@ class SilktideCookieBanner {
     this.customTriggerObserver = null;
     this.customTriggerSelector = '';
     this.boundCustomTriggerHandler = null;
+    this.customTriggerRetryTimer = null;
+    this.customTriggerRetryCount = 0;
+    this.maxCustomTriggerRetries = 20;
     this.backdrop = null;
 
     this.createWrapper();
@@ -57,6 +60,11 @@ class SilktideCookieBanner {
       this.customTriggerObserver.disconnect();
       this.customTriggerObserver = null;
     }
+    if (this.customTriggerRetryTimer) {
+      clearTimeout(this.customTriggerRetryTimer);
+      this.customTriggerRetryTimer = null;
+    }
+    this.customTriggerRetryCount = 0;
     if (this.boundCustomTriggerHandler) {
       document.removeEventListener('click', this.boundCustomTriggerHandler, true);
       this.boundCustomTriggerHandler = null;
@@ -558,6 +566,42 @@ class SilktideCookieBanner {
     this.customTriggerObserver.observe(document.body, { childList: true, subtree: true });
   }
 
+  scheduleCustomTriggerRetry(triggerIdOrSelector) {
+    if (!triggerIdOrSelector || this.customTriggerRetryTimer) {
+      return;
+    }
+
+    this.customTriggerRetryCount = 0;
+
+    const tryBind = () => {
+      const triggerEl = this.findCookieTriggerElement(triggerIdOrSelector);
+      if (triggerEl) {
+        this.cookieIcon = triggerEl;
+        this.cookieTriggerIsCustomLink = true;
+        this.cookieIconDefaultDisplay = this.cookieIcon.style.display || '';
+
+        if (this.config.text?.banner?.preferencesButtonAccessibleLabel) {
+          this.cookieIcon.ariaLabel = this.config.text.banner.preferencesButtonAccessibleLabel;
+        }
+
+        this.attachCookieTriggerClickListener();
+        this.customTriggerRetryTimer = null;
+        this.customTriggerRetryCount = 0;
+        return;
+      }
+
+      this.customTriggerRetryCount += 1;
+      if (this.customTriggerRetryCount >= this.maxCustomTriggerRetries) {
+        this.customTriggerRetryTimer = null;
+        return;
+      }
+
+      this.customTriggerRetryTimer = setTimeout(tryBind, 500);
+    };
+
+    this.customTriggerRetryTimer = setTimeout(tryBind, 250);
+  }
+
   normalizeTriggerSelector(triggerIdOrSelector) {
     const normalized = String(triggerIdOrSelector || '').trim();
     if (!normalized) {
@@ -629,7 +673,12 @@ class SilktideCookieBanner {
 
   createCookieIcon() {
     const customTriggerId = this.config.customPageIdLink || this.config.cookieTriggerId;
-    const fallbackTriggerId = 'silktide-cookie-link';
+
+    // Ensure legacy floating icons never show.
+    const legacyIcon = document.getElementById('silktide-cookie-icon');
+    if (legacyIcon) {
+      legacyIcon.style.display = 'none';
+    }
 
     this.customTriggerSelector = customTriggerId
       ? this.normalizeTriggerSelector(customTriggerId)
@@ -637,12 +686,7 @@ class SilktideCookieBanner {
 
     this.cookieIcon = customTriggerId
       ? this.findCookieTriggerElement(customTriggerId)
-      : document.getElementById(fallbackTriggerId);
-
-    // Backward-compatibility fallback for older markup that used this id directly.
-    if (!this.cookieIcon && !customTriggerId) {
-      this.cookieIcon = document.getElementById('silktide-cookie-icon');
-    }
+      : null;
 
     if (!this.cookieIcon) {
       if (customTriggerId) {
@@ -654,6 +698,7 @@ class SilktideCookieBanner {
         }
         this.attachDelegatedCustomTriggerListener();
         this.watchForCustomTrigger(customTriggerId);
+        this.scheduleCustomTriggerRetry(customTriggerId);
       }
       return;
     }
@@ -674,21 +719,7 @@ class SilktideCookieBanner {
       this.createWrapper();
     }
 
-    // For custom links in the page, keep the element in place.
-    if (!this.cookieTriggerIsCustomLink) {
-      // Append child to wrapper
-      this.wrapper.appendChild(this.cookieIcon);
-    }
-
-    // Add positioning class from config
-    if (this.cookieIcon && this.config.cookieIcon?.position) {
-      this.cookieIcon.classList.add(this.config.cookieIcon.position);
-    }
-
-    // Add color scheme class from config
-    if (this.cookieIcon && this.config.cookieIcon?.colorScheme) {
-      this.cookieIcon.classList.add(this.config.cookieIcon.colorScheme);
-    }
+    // Custom trigger stays in-place in the page DOM.
   }
 
   showCookieIcon() {
